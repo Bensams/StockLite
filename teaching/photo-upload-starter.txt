@@ -1,0 +1,21 @@
+SESSION 1 STARTER — NOT IMPORTED BY THE APPLICATION
+Timebox: 45-minute integration block. Work only on this prepared adapter in a copy/branch.
+Given: authenticated db client, validated bytes/MIME, generated owner-scoped path.
+Task: replace the two TODO lines below; compare with app/api/photos/route.ts afterwards.
+
+async function classroomUpload(db, path, bytes, contentType) {
+  // TODO: call db.storage.from('product-photos').upload with upsert:false.
+  // TODO: inspect error; throw a recoverable error or return the path.
+}
+
+ANSWER / REVIEW:
+async function classroomUpload(db, path, bytes, contentType) {
+  const { error } = await db.storage.from('product-photos')
+    .upload(path, bytes, { contentType, upsert: false });
+  if (error) throw new Error('Photo upload failed. Retry or explicitly save without photo.');
+  return { path };
+}
+
+Do not remove authentication, signature/size checks, path generation, or cleanup logic.
+Demonstrate success, unsupported/oversized rejection, and controlled storage failure.
+Submit a small diff plus sanitized Network evidence and TC-09 to TC-11 results.

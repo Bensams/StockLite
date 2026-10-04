@@ -1,0 +1,4 @@
+import {endpoint,dbError,ApiError} from '@/lib/server';
+import {movementSchema} from '@/lib/validation';
+export async function GET(req:Request){return endpoint(req,'movements.list',async db=>{const id=new URL(req.url).searchParams.get('product_id');let query=db.from('stock_movements').select('*').order('created_at',{ascending:false});if(id)query=query.eq('product_id',id);const {data,error}=await query.limit(500);dbError(error);return data;});}
+export async function POST(req:Request){return endpoint(req,'movements.adjust',async db=>{const parsed=movementSchema.safeParse(await req.json());if(!parsed.success)throw new ApiError(422,'Send quantity as a positive whole number, a short note, product ID, type, and request ID.');const v=parsed.data;const {data,error}=await db.rpc('adjust_stock',{p_product_id:v.product_id,p_type:v.type,p_quantity:v.quantity,p_note:v.note,p_request_id:v.request_id});dbError(error);return data;});}
