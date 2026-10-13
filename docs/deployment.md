@@ -44,10 +44,7 @@ If the build fails, fix all TypeScript errors and linting issues before proceedi
 If you haven't already applied migrations to your production Supabase project:
 
 1. Open Supabase Dashboard → SQL Editor
-2. Run each migration file in order:
-   - `supabase/migrations/001_initial_schema.sql`
-   - `supabase/migrations/002_stock_functions.sql`
-   - `supabase/migrations/003_policies.sql`
+2. Run the migration file `supabase/migrations/001_inventory.sql` (it creates the tables, functions, policies and the `product-photos` bucket)
 
 **Verify tables exist**:
 ```sql
@@ -160,11 +157,11 @@ Click **Environment Variables** and add:
 | Name | Value | Where to find |
 |------|-------|---------------|
 | `NEXT_PUBLIC_SUPABASE_URL` | `https://your-project.supabase.co` | Supabase Dashboard → Settings → API |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `eyJhbG...` (long JWT) | Supabase Dashboard → Settings → API → `anon` `public` key |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_...` | Supabase Dashboard → Settings → API Keys → Publishable key |
 
 **Important**:
-- Use the **anon/public key**, NOT the service role key
-- The `NEXT_PUBLIC_` prefix makes these available to the browser (this is safe for the anon key)
+- Use the **publishable key**, NOT the secret (service role) key
+- The `NEXT_PUBLIC_` prefix makes these available to the browser (this is safe for the publishable key; RLS protects the data)
 - Do NOT commit these values to Git
 
 **Step 4: Deploy**
@@ -206,7 +203,7 @@ vercel
 vercel env add NEXT_PUBLIC_SUPABASE_URL production
 # Paste the value when prompted
 
-vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY production
+vercel env add NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY production
 # Paste the value when prompted
 ```
 
@@ -335,7 +332,7 @@ npm run build
 
 **Check**:
 1. Vercel Dashboard → Project → Settings → Environment Variables
-2. Verify `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are set
+2. Verify `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` are set
 
 **Fix**:
 1. Add missing variables
@@ -439,13 +436,13 @@ npm run build
 | Variable | Purpose | Example | Where to get |
 |----------|---------|---------|--------------|
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL | `https://abc.supabase.co` | Supabase → Settings → API |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Public client key | `eyJhbG...` | Supabase → Settings → API → anon public |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Public client key | `sb_publishable_...` | Supabase → Settings → API Keys → Publishable key |
 
 ### Optional
 
 | Variable | Purpose | Default | Notes |
 |----------|---------|---------|-------|
-| `NEXT_PUBLIC_TEACHING_DEFECT` | Enable teaching defects | `` (none) | **Never set in production** |
+| `TEACHING_DEFECT` | Session 2 teaching defects: `preview`, `mismatch`, `storage` | blank | Ignored outside `npm run dev`; **never set in production** |
 
 ---
 
@@ -491,7 +488,7 @@ jobs:
           node-version: '18'
       - run: npm ci
       - run: npm run lint
-      - run: npm run type-check
+      - run: npm run typecheck
       - run: npm run build
 ```
 
@@ -566,7 +563,7 @@ Vercel will still deploy, but CI failures notify you before pushing to productio
 ## Security Best Practices
 
 - [ ] Never commit `.env.local` or secrets to Git
-- [ ] Use `NEXT_PUBLIC_` prefix only for truly public values (URLs, anon keys)
+- [ ] Use `NEXT_PUBLIC_` prefix only for truly public values (URLs, publishable keys)
 - [ ] Keep service role keys out of client code entirely
 - [ ] Enable RLS on all tables
 - [ ] Use private Storage buckets with signed URLs

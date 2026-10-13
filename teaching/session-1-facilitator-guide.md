@@ -50,7 +50,7 @@ Students configure Supabase Storage, implement photo upload in a prepared starte
 
 **B. SDK integration pattern (7 minutes)**
 - Import the client library
-- Initialize with project URL and anon key
+- Initialize with project URL and publishable key
 - Call `storage.from('bucket').upload(path, file)`
 - Handle promise resolution and errors
 

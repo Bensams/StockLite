@@ -180,7 +180,7 @@ npm install
 # 2. Configure environment
 # Edit .env.local with your Supabase credentials:
 # - NEXT_PUBLIC_SUPABASE_URL
-# - NEXT_PUBLIC_SUPABASE_ANON_KEY
+# - NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 
 # 3. Apply database migration
 # In Supabase SQL Editor, run:

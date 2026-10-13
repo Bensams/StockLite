@@ -115,13 +115,13 @@ Adapt roles for smaller teams: Lead + Demonstrator can be combined; Support and 
 - Movement submission: idempotency key, atomic function, serialized updates
 
 **B. Debugging tools (7 minutes)**
-- **Browser Console**: Client-side errors, validation feedback, state inspection
-- **Network tab**: Request payloads, response statuses (200, 400, 401, 403, 500), timing
-- **Server logs** (terminal running dev server): Request IDs, operation names, safe error details
-- **Database inspection** (Supabase dashboard or SQL): Verify actual stored data vs. displayed data
+- **Browser Console**: Uncaught JavaScript errors, plus a red line for every failed request (e.g. `POST …/api/movements 422 (Unprocessable Entity)`). StockLite prints nothing here on success.
+- **Network tab**: Request payloads and response bodies. StockLite uses 200, 401, 403, 404, 409, 422, and 503 (see `docs/api-reference.md`).
+- **Server logs** (terminal running `npm run dev`): one JSON line per API call, e.g. `{"operation":"movements.adjust","request_id":"…","outcome":"failure","status":422}`, followed by Next.js's own `POST /api/movements 422 in 31ms`
+- **Database inspection** (Supabase dashboard → Table Editor): Verify actual stored data vs. displayed data
 - **Storage policies**: Check bucket settings if photo access fails
 
-Show each tool briefly. Emphasize that a 200 response with partial success (upload OK, save failed) is different from a 500 error (complete failure).
+Show each tool briefly. Point out that every API response body carries a `request_id`, and the same ID appears in the server log line. That is how one browser request is matched to one server event. Also explain partial failure: a photo can upload (200) and the product save can still fail (409/422/503). StockLite then deletes the orphaned photo and reports the save error.
 
 **C. Common defect patterns (5 minutes)**
 - **UI defect**: Display logic wrong, but database correct (e.g., string concatenation shows 105 instead of 15)
@@ -156,12 +156,12 @@ Choose a product with balance 10.
    - Server terminal (last few log lines visible)
 4. Click Save movement
 5. **Trace the request**:
-   - Network: POST to `/api/movements`, status 200, inspect payload and response
-   - Console: Look for any client-side logs
-   - Server: Find the request ID, operation name, outcome
-   - UI: Balance updates to 15, new movement appears
+   - Network: `POST /api/movements`, status 200. Payload has `"quantity": 5`; response is `{"data": {…"previous_balance":10,"resulting_balance":15…}, "request_id": "…"}`
+   - Console: stays clean (no errors)
+   - Server: find the line `{"operation":"movements.adjust","request_id":"…","outcome":"success","status":200}` and show that its `request_id` matches the Network response
+   - UI: Balance updates to 15, new movement appears (the page then re-fetches `/api/products` and `/api/movements`; point out those GET lines)
 6. Reload page: Balance persists at 15
-7. Open Database in Supabase dashboard: Show the `stock_movements` row with `previous_balance: 10`, `resulting_balance: 15`
+7. Open Supabase dashboard → Table Editor → `stock_movements`: Show the row with `previous_balance: 10`, `resulting_balance: 15` (the project owner must be logged in on the demo laptop)
 
 **Key points**:
 - Request succeeded at every layer
@@ -170,26 +170,28 @@ Choose a product with balance 10.
 
 **Demo 2: Controlled defect — Request field mismatch (10 minutes)**
 
-Activate the teaching defect that sends an unexpected field name (see `teaching/defects.md` for activation).
+**Before class**: rehearse this once. To activate, stop the server, set `TEACHING_DEFECT=mismatch` in `.env.local`, run `npm run dev`, and refresh. A yellow banner "Development teaching defect active: mismatch" confirms it. Details: `teaching/defects.md`. Do not show `.env.local` on the projector; switch windows or describe the change.
 
-1. Attempt to save a movement
+1. Stock In 5 with note "Received five" → Save movement
 2. **Observe**:
-   - Network: 400 Bad Request
-   - Response body: `"Field 'qty' not recognized; expected 'quantity'"`
-   - Console: Error message displayed
-   - Server log: Validation failure with request ID
+   - UI: red notice *"Send quantity as a positive whole number, a short note, product ID, type, and request ID."* Balance unchanged.
+   - Network: `POST /api/movements` → **422 Unprocessable Entity**
+   - Response body: `{"error":"Send quantity as a positive whole number, …","request_id":"…"}`
+   - Console: red line `POST http://localhost:3000/api/movements 422 (Unprocessable Entity)`
+   - Server log: `{"operation":"movements.adjust","request_id":"<same ID>","outcome":"failure","status":422}`
 3. **Diagnose**:
-   - Open browser DevTools → Sources or Network → Inspect the request payload
-   - Compare with API documentation (`docs/api-reference.md`)
-   - Root cause: Client sending wrong field name
+   - Network → Payload: `{"product_id":"…","type":"IN","note":"Received five","request_id":"…","amount":5}`. There is **no `quantity`**.
+   - Compare with the `POST /api/movements` contract in `docs/api-reference.md`: `quantity` is required, and unknown fields are rejected
+   - Database: no new row in `stock_movements`. The request was stopped by validation in the API route and never reached the database.
+   - Root cause: client sends `amount` instead of `quantity`. The code is in `app/page.tsx`, `MovementForm`: `if (defect === 'mismatch') { body.amount = body.quantity; delete body.quantity; }`
 4. **Correct**:
-   - Show the corrected code (or prepared patch)
-   - Reset the defect
-   - Retry the movement: succeeds
+   - Explain the fix: send the field name the contract defines; do **not** loosen the server to accept `amount`
+   - Reset the defect (`TEACHING_DEFECT=`, restart, banner gone)
+   - Retry the same movement: 200, history shows 10 → 15
 5. **Document**:
-   - Defect: "Movement form sent 'qty' instead of 'quantity'"
-   - Evidence: Network screenshot with 400 response
-   - Corrective action: "Changed frontend field name to match API contract"
+   - Defect: "Movement form sent `amount` instead of `quantity` (API contract mismatch)"
+   - Evidence: Network screenshot showing the 422 response and the payload
+   - Corrective action: "Changed the frontend field name to match the API contract"
    - Retest: Pass
 
 **Transition**: "You've seen the process. Now prepare your test plan."
@@ -233,7 +235,7 @@ Activate the teaching defect that sends an unexpected field name (see `teaching/
 - **Minute 20**: Announce "Teaching defect B is now active" (field mismatch)
 - **Minute 30**: Announce "Teaching defect C is now active" (storage failure simulation)
 
-Provide the reset commands in writing so students can deactivate defects after capturing evidence.
+Each switch means stopping the server, changing `TEACHING_DEFECT` in `.env.local` (`preview`, then `mismatch`, then `storage`), and running `npm run dev` again. Announce before you restart; signed-in students stay signed in. Only the person running the server can switch or reset a defect. Students capture evidence and tell the demonstrator when they are done.
 
 **Facilitator activity**:
 - Support: Circulate, help students find Network tab or server logs
@@ -288,9 +290,13 @@ Provide the reset commands in writing so students can deactivate defects after c
 
 See `teaching/defects.md` for detailed activation, symptoms, diagnostic clues, root causes, corrective patches, and reset commands for:
 
-1. **Defect A**: Incorrect quantity preview (string concatenation)
-2. **Defect B**: Request field mismatch (client sends `qty` instead of `quantity`)
-3. **Defect C**: Storage unavailable (controlled upload failure)
+| Defect | `.env.local` setting | What students see |
+|---|---|---|
+| A: preview adds text | `TEACHING_DEFECT=preview` | Stock In preview shows 105 instead of 15; saved data is correct |
+| B: field mismatch | `TEACHING_DEFECT=mismatch` | Client sends `amount` instead of `quantity` → 422 |
+| C: storage unavailable | `TEACHING_DEFECT=storage` | `POST /api/photos` → 503; product not saved unless "Save without selected photo" is ticked |
+
+Defects work only under `npm run dev`. A yellow banner shows the active defect to signed-in users.
 
 **Important**: Defects are inactive by default. Activate only during the test challenge window. Reset immediately after evidence capture so subsequent tests run correctly.
 
@@ -307,9 +313,10 @@ See `teaching/defects.md` for detailed activation, symptoms, diagnostic clues, r
 - Alternatively, show students how to check the existing terminal scrollback
 
 ### "I can't reproduce the defect"
-- Confirm the defect is activated (check activation command output)
+- Confirm the yellow "Development teaching defect active" banner is visible, or open `/api/config` and check `"defect"`
+- If the banner is missing: the server was not restarted after editing `.env.local`, the variable name is wrong (it is `TEACHING_DEFECT`, not `NEXT_PUBLIC_…`), or the server was started with `npm start` instead of `npm run dev`
+- Defect A only affects **Stock In**; Defect C only affects saves **with a new photo**
 - Verify the student is using the correct test account
-- Check browser cache (hard refresh: Ctrl+Shift+R)
 
 ### "The database shows different data than the UI"
 - This is expected for UI defects — guide the student to identify the discrepancy
@@ -317,7 +324,8 @@ See `teaching/defects.md` for detailed activation, symptoms, diagnostic clues, r
 
 ### Storage photos not loading
 - Check bucket policies in Supabase dashboard
-- Verify `NEXT_PUBLIC_SUPABASE_URL` and `ANON_KEY` in `.env.local`
+- Verify `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` are set in `.env.local` (check privately; do not project the file)
+- Signed photo URLs expire after 5 minutes: click **Refresh inventory** to get new ones
 - Confirm the bucket is private and signed URLs are being requested
 
 ### Student finishes early
@@ -334,17 +342,17 @@ Use these during the session or as a post-session quiz.
 1. **Where would you look first if a product's balance displays incorrectly but the database shows the correct value?**  
    **Answer**: Browser Console and the component rendering logic (UI defect).
 
-2. **A movement request returns HTTP 400. Where do you find the detailed error message?**  
-   **Answer**: Network tab → Response body; also check server log for request ID and validation details.
+2. **A movement request returns HTTP 422. Where do you find the detailed error message?**  
+   **Answer**: Network tab → Response body (`error` field). The UI shows the same message. Use the `request_id` in the response to find the matching server log line, which records the operation and status.
 
-3. **What does it mean if a photo upload returns 200 but the product save returns 500?**  
-   **Answer**: The upload succeeded but saving the reference failed; the photo is uploaded but not linked. The app should report partial failure and offer retry or cleanup.
+3. **What does it mean if a photo upload returns 200 but the product save then fails (409, 422, or 503)?**  
+   **Answer**: Partial failure: the file reached storage but the product row was not saved. StockLite deletes the orphaned photo and shows the save error. If that cleanup also fails, it says so and names the file path. It never reports full success.
 
 4. **How does StockLite prevent the same movement from being applied twice if you retry?**  
    **Answer**: Idempotency key: the client generates a request ID; the database function checks for an existing movement with that ID and reuses the result.
 
-5. **You see a 403 error when accessing another account's product. Is this a defect?**  
-   **Answer**: No, this is correct behavior. RLS policies enforce ownership isolation; 403 means access control is working.
+5. **Account B tries to archive Account A's product by its ID and gets 404 "Product not found." Is this a defect?**  
+   **Answer**: No, this is correct behavior. Row Level Security hides other owners' rows, so to account B the product does not exist. Answering "not found" instead of "forbidden" also avoids confirming that the ID exists.
 
 ---
 

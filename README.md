@@ -58,26 +58,25 @@ Create `.env.local` in the project root:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
 ```
 
 Get these values from your Supabase project:
 - Dashboard → Settings → API → Project URL
-- Dashboard → Settings → API → `anon` `public` key
+- Dashboard → Settings → API Keys → Publishable key (`sb_publishable_...`)
 
 ### 4. Set up the database
 
-Run migrations in Supabase SQL Editor (Dashboard → SQL Editor):
+Run the migration in Supabase SQL Editor (Dashboard → SQL Editor):
 
-1. `supabase/migrations/001_initial_schema.sql`
-2. `supabase/migrations/002_stock_functions.sql`
-3. `supabase/migrations/003_policies.sql`
+- `supabase/migrations/001_inventory.sql` creates the tables, functions, Row Level Security policies and the `product-photos` bucket
 
 ### 5. Configure Supabase Storage
 
-1. Dashboard → Storage → Create new bucket: `product-photos`
-2. Set to **Private**
-3. Run the storage policies from `supabase/migrations/004_storage_policies.sql`
+The migration already creates the private `product-photos` bucket (2 MB limit; JPEG, PNG, WebP) and its policies. Check that it exists:
+
+1. Dashboard → Storage → `product-photos` is listed
+2. It is marked **Private**
 
 ### 6. Create a test account
 
@@ -146,7 +145,7 @@ npm start            # Start production server
 
 # Code Quality
 npm run lint         # Run ESLint
-npm run type-check   # Run TypeScript compiler checks
+npm run typecheck    # Run TypeScript compiler checks
 
 # Testing
 npm run test         # Run automated tests (if configured)

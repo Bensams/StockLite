@@ -420,12 +420,12 @@ Should return zero rows if all stock balances are consistent.
 
 ## Migration Strategy
 
-Migrations are applied in order:
+StockLite has one migration, `supabase/migrations/001_inventory.sql`. It creates, in order:
 
-1. **001_initial_schema.sql**: Create tables, constraints, indexes
-2. **002_stock_functions.sql**: Create `adjust_stock` and trigger functions
-3. **003_policies.sql**: Enable RLS and create policies
-4. **004_storage_policies.sql**: Create Supabase Storage bucket policies (applied via dashboard)
+1. Tables, constraints and indexes (`products`, `stock_movements`)
+2. The `save_product`, `adjust_stock` and `manage_product` functions
+3. Row Level Security and the ownership policies
+4. The `product-photos` Storage bucket and its policies
 
 **Rollback**: Not implemented. For development, drop tables and re-apply migrations. For production, write explicit rollback migrations.
 

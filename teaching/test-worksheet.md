@@ -302,17 +302,18 @@ Leave **Actual Result** and **Evidence** columns blank initially. The example ro
 
 ### TC-11: Storage request fails
 
-**Preconditions**: Teaching defect mode enabled or storage misconfigured  
-**Input**: Valid photo file
+**Preconditions**: Facilitator has restarted the dev server with `TEACHING_DEFECT=storage` (yellow banner visible)  
+**Input**: Valid photo file (PNG/JPEG under 2 MB)
 
 **Steps**:
-1. Activate storage-failure teaching defect (if available)
+1. Confirm the banner reads "Development teaching defect active: storage"
 2. Open Edit product
 3. Select a valid photo
-4. Attempt to save
-5. Observe error handling
+4. Click Save product; note the Network status of `POST /api/photos`
+5. Tick "Save without selected photo" and save again
+6. After the facilitator resets the defect, upload the photo again
 
-**Expected result**: Clear error, app stays usable, no false success message
+**Expected result**: Step 4: 503 with a clear message, form stays open, no success message. Step 5: product saves without the new photo. Step 6: upload succeeds.
 
 **Actual result**: _______________________________________________________________
 
@@ -358,18 +359,19 @@ Leave **Actual Result** and **Evidence** columns blank initially. The example ro
 
 ### TC-13: Retry the same movement request
 
-**Preconditions**: Product balance known  
+**Preconditions**: Product balance known; DevTools open on the Network tab  
 **Input**: Stock In 7 units with note "Test idempotency"
 
 **Steps**:
-1. Open movement form
-2. Enter quantity 7, note "Test idempotency"
-3. Save movement
-4. Note the new balance
-5. Without changing values, click Save again
-6. Verify movement is not duplicated
+1. Stock In 7 units with note "Test idempotency" and save. Note the new balance.
+2. In the Network tab, right-click the `POST /api/movements` request → **Copy → Copy as fetch**.
+3. Paste it into the Console and press Enter. This sends the exact same request again, with the same `request_id`.
+4. Click **Refresh inventory**, then check the balance and the movement history.
+5. Optional: paste it again, change `"quantity":7` to `8`, keep the same `request_id`, and run it.
 
-**Expected result**: Movement applied exactly once; second save reuses request ID
+**Expected result**: The replay returns 200 with the same movement (same previous and resulting balance). The balance rises by 7 only once, and the history shows one "Test idempotency" entry. Step 5 returns 409 "This request ID was already used for different values. Start a new movement."
+
+> Why the Console: the form clears after a successful save, so you cannot click Save again with the same values. The form reuses a request ID only when you retry after a failed or uncertain save; the replay simulates a request that reaches the server twice.
 
 **Actual result**: _______________________________________________________________
 
@@ -381,7 +383,7 @@ Leave **Actual Result** and **Evidence** columns blank initially. The example ro
 
 **Retest result**: ☐ Pass  ☐ Fail  ☐ N/A
 
-**Evidence**: Screenshot of movement history showing one entry
+**Evidence**: Console screenshot of the replayed response, and the movement history showing one entry
 
 ---
 
@@ -415,16 +417,22 @@ Leave **Actual Result** and **Evidence** columns blank initially. The example ro
 
 ### TC-15: Access another account's product or image
 
-**Preconditions**: Two test accounts with separate inventories  
-**Input**: Product ID or photo URL from Account A
+**Preconditions**: Two test accounts, A and B, with separate inventories  
+**Input**: A product ID from Account A
 
 **Steps**:
-1. Sign in as Account A, create a product, note its ID
-2. Sign in as Account B
-3. Attempt to access Account A's product via direct URL or API
-4. Attempt to access Account A's photo URL
+1. Sign in as A. In the Network tab, open `GET /api/products` and copy one product `id` from the response.
+2. Sign out and sign in as B. Check that A's product is not in B's list.
+3. In the Console, run:
+   ```js
+   await fetch('/api/movements?product_id=PASTE_A_ID').then(r => r.json())
+   await fetch('/api/products', {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id: 'PASTE_A_ID', action: 'archive'})}).then(r => r.status)
+   ```
+4. Sign in as A again and check the product.
 
-**Expected result**: Access denied; no data leakage
+**Expected result**: B's list does not include A's product. The movements call returns an empty list (`data: []`), and the PATCH returns 404 "Product not found. Refresh your inventory." A's product is unchanged. Row Level Security hides other owners' rows, so the app answers "not found", not 403.
+
+> Photos: a photo URL is a signed URL that works for anyone who has the link for 5 minutes, then expires. That is expected, not a defect. B cannot list or download A's files through the Storage API (`npm run test:live` checks this).
 
 **Actual result**: _______________________________________________________________
 
@@ -436,7 +444,7 @@ Leave **Actual Result** and **Evidence** columns blank initially. The example ro
 
 **Retest result**: ☐ Pass  ☐ Fail  ☐ N/A
 
-**Evidence**: Network tab screenshot showing 403 or equivalent
+**Evidence**: Console screenshot showing the empty list and the 404
 
 ---
 

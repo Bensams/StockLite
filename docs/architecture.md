@@ -224,8 +224,8 @@ graph TB
 - Display uses signed URLs (temporary, secure access)
 
 **Signed URLs**:
-- Generated server-side or client-side with anon key
-- Expire after configured time (default: 1 hour)
+- Generated server-side by `GET /api/products` (`createSignedUrl(path, 300)`)
+- Expire after 5 minutes; Refresh inventory requests new ones
 - Allow temporary access without exposing storage credentials
 
 ---

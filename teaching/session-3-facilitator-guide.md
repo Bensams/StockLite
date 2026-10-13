@@ -46,13 +46,14 @@ Students configure production environment variables, prepare or perform a Vercel
 
 **A. Required environment variables (7 minutes)**
 - `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+- `TEACHING_DEFECT` is development-only: production builds (including Vercel) ignore it
 - Any additional backend-only secrets (if applicable)
 
 **Demonstrate**:
 - Show `.env.example` with placeholders
 - Show Vercel dashboard → Settings → Environment Variables
-- Explain why `NEXT_PUBLIC_*` is safe for browser exposure (anon key is rate-limited, RLS enforces security)
+- Explain why `NEXT_PUBLIC_*` is safe for browser exposure (the publishable key only identifies the project; RLS enforces security)
 
 **B. Supabase production readiness (7 minutes)**
 - Verify database migrations applied

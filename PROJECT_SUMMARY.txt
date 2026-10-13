@@ -12,7 +12,7 @@ QUICK START
 
 1. Configure .env.local (already created):
    NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
 
 2. Apply database migration:
    - Open Supabase SQL Editor

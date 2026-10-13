@@ -13,12 +13,12 @@ Use this checklist to verify StockLite is ready for classroom use across all thr
 - [ ] `.env.local` configured with development Supabase credentials
 - [ ] `npm run dev` starts without errors
 - [ ] Application loads at `http://localhost:3000`
-- [ ] No TypeScript or lint errors: `npm run lint && npm run type-check`
+- [ ] No TypeScript or lint errors: `npm run lint && npm run typecheck`
 
 ### Supabase Configuration
 
 - [ ] Supabase project created (development or classroom-dedicated)
-- [ ] Database migrations applied in order (001, 002, 003)
+- [ ] Database migration applied (`supabase/migrations/001_inventory.sql`)
 - [ ] Tables verified: `products`, `stock_movements` exist
 - [ ] RLS enabled on both tables
 - [ ] Policies verified: `SELECT * FROM pg_policies WHERE schemaname = 'public';`

@@ -152,7 +152,7 @@ vercel --prod
 npm run lint
 
 # Type check
-npm run type-check
+npm run typecheck
 
 # Run tests
 npm test
@@ -197,10 +197,10 @@ SELECT * FROM storage.policies WHERE bucket_id = 'product-photos';
 Create `.env.local`:
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
 ```
 
-Get values from: Dashboard → Settings → API
+Get values from: Dashboard → Settings → API Keys. Use the Publishable key, never the secret key.
 
 ### 4. Test Account
 

@@ -1,637 +1,295 @@
 # API Reference — StockLite Backend Contracts
 
-This document describes the HTTP API exposed by StockLite's Next.js Route Handlers. Use these contracts for frontend integration, testing, and debugging.
+This is the contract between StockLite's browser UI (`app/page.tsx`) and its Next.js Route Handlers (`app/api/*/route.ts`). Each entry was checked against the source code. When a request "doesn't work", compare what the Network tab shows with this page.
 
 ---
 
-## Authentication
+## Conventions
 
-All API routes require authentication via Supabase Auth. The client must include a valid session token in the `Authorization` header or cookies.
+**Base URL**: the address of the running app, e.g. `http://localhost:3000`. All endpoints are under `/api`.
 
-**Unauthenticated requests return**:
+**Authentication**: a session cookie set by `POST /api/auth`. The browser sends it automatically on same-site requests. There is no `Authorization` header to manage.
+
+**Body format**: JSON (`Content-Type: application/json`), except photo upload (`multipart/form-data`).
+
+**Strict bodies**: request bodies are validated with Zod schemas (`lib/validation.ts`). Missing required fields **and unknown extra fields** are rejected.
+
+**Response envelope** (all endpoints except `/api/auth` and `/api/config`):
+
 ```json
-{
-  "error": "Unauthorized"
-}
+// Success: HTTP 200
+{ "data": { … }, "request_id": "4f0c…-uuid" }
+
+// Failure: HTTP 4xx/5xx
+{ "error": "Human-readable message shown in the UI", "request_id": "4f0c…-uuid" }
 ```
-Status: `401 Unauthorized`
+
+The same `request_id` is printed in the server log (development only), one JSON line per API call:
+
+```
+{"operation":"movements.adjust","request_id":"4f0c…-uuid","outcome":"failure","status":422}
+ POST /api/movements 422 in 31ms
+```
+
+Responses include `Cache-Control: no-store`.
+
+**Cross-site protection**: a write request (`POST`, `PUT`, `PATCH`, `DELETE`) whose `Origin` header is a different site is rejected with **403** *"Cross-site request blocked. Open StockLite directly."*
+
+### Status codes used by StockLite
+
+| Code | Meaning in StockLite | Typical message |
+|---|---|---|
+| **200** | Success | — |
+| **400** | Request body could not be read (e.g. not valid JSON) | "Check your request and try again." |
+| **401** | Not signed in / session ended | "Your session has ended. Sign in again." |
+| **403** | Write request came from another site | "Cross-site request blocked. Open StockLite directly." |
+| **404** | Product does not exist **or belongs to another account** | "Product not found. Refresh your inventory." |
+| **409** | Request conflicts with current data (stock, archive state, duplicates) | "Not enough stock. Reduce the quantity and retry." |
+| **422** | Values break the rules (validation) | "Send quantity as a positive whole number, …" |
+| **503** | A service (database, storage, configuration) could not complete the request | "Photo upload failed. Retry, or choose Save without selected photo." |
+
+StockLite never returns 500 on purpose. Errors are caught and translated into one of the codes above.
 
 ---
 
-## Base URL
+## Endpoint Summary
 
-**Development**: `http://localhost:3000` (or your dev port)  
-**Production**: `https://[your-vercel-deployment].vercel.app`
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/auth` | Sign in or sign out |
+| GET | `/api/config` | Is the app configured? Who is signed in? Is a teaching defect on? |
+| GET | `/api/products` | List your products |
+| POST | `/api/products` | Create a product |
+| PUT | `/api/products?id=<uuid>` | Update a product's details |
+| PATCH | `/api/products` | Archive, restore, or delete a product |
+| GET | `/api/movements` | List stock movements (optionally for one product) |
+| POST | `/api/movements` | Stock In / Stock Out |
+| POST | `/api/photos` | Upload a product photo |
+| DELETE | `/api/photos` | Remove an unused photo |
 
 ---
 
-## Products API
+## Auth
+
+### POST /api/auth — sign in
+
+```json
+{ "email": "group@example.edu", "password": "••••••••" }
+```
+
+| Result | Status | Body |
+|---|---|---|
+| Signed in (session cookies set) | 200 | `{ "data": { "ok": true } }` |
+| Email or password missing | 422 | `{ "error": "Enter your classroom email and password." }` |
+| Wrong credentials | 401 | `{ "error": "Sign in failed. Check your classroom credentials and connection, then retry." }` |
+| Supabase Auth unavailable / app not configured | 503 | error message |
+
+Accounts are created by the facilitator in the Supabase dashboard. There is no sign-up endpoint.
+
+### POST /api/auth — sign out
+
+```json
+{ "action": "logout" }
+```
+→ 200 `{ "data": { "ok": true } }`
+
+### GET /api/config
+
+Public. Used by the page on load.
+
+```json
+{ "data": { "configured": true, "email": "group@example.edu", "defect": "" } }
+```
+`email` is `null` when signed out. `defect` is the active teaching defect (`preview`, `mismatch`, `storage`) or `""`. It is always `""` outside `npm run dev`.
+
+---
+
+## Products
 
 ### GET /api/products
 
-Fetch all products owned by the authenticated user.
+Returns **only the signed-in account's** products, newest first (Row Level Security).
 
-**Query parameters**:
-- `search` (optional): Filter by SKU or name (case-insensitive)
-- `category` (optional): Filter by exact category match
-- `status` (optional): `active`, `low-stock`, or `archived`
-
-**Request example**:
-```
-GET /api/products?search=pen&status=active
-```
-
-**Response (200 OK)**:
 ```json
 {
-  "products": [
+  "data": [
     {
-      "id": "uuid",
-      "sku": "DEMO-10",
-      "name": "Blue ballpoint pens",
-      "category": "Writing",
-      "unit_price": "12.50",
-      "quantity": 12,
-      "low_stock_threshold": 3,
-      "image_path": "user-id/photo.jpg",
-      "archived_at": null,
-      "created_at": "2026-10-07T10:00:00Z",
-      "updated_at": "2026-10-07T10:00:00Z"
+      "id": "uuid", "owner_id": "uuid",
+      "sku": "PEN-BLUE", "name": "Blue ballpoint pens", "category": "Writing",
+      "price_centavos": 1250, "quantity": 10, "low_stock_threshold": 3,
+      "image_path": "owner-uuid/photo-uuid.png", "archived_at": null,
+      "created_at": "…", "updated_at": "…",
+      "image_url": "https://…signed…", "photo_error": false
     }
-  ]
+  ],
+  "request_id": "…"
 }
+```
+`image_url` is a signed URL valid for **5 minutes**; it is present only when the product has a photo. Prices are stored in **centavos** (₱12.50 → `1250`).
+
+### POST /api/products — create
+
+| Field | Type | Rule |
+|---|---|---|
+| `sku` | string | 1–40 characters, trimmed, stored uppercase, unique per account |
+| `name` | string | 1–120 characters |
+| `category` | string | 1–60 characters |
+| `price_centavos` | integer | 0 – 1,000,000,000 |
+| `opening_quantity` | integer | ≥ 0 (default 0) |
+| `low_stock_threshold` | integer | 0 – 1,000,000,000 |
+| `image_path` | string or null | A path returned by `POST /api/photos` (default null) |
+
+```json
+{ "sku": "PEN-BLUE", "name": "Blue ballpoint pens", "category": "Writing",
+  "price_centavos": 1250, "opening_quantity": 10, "low_stock_threshold": 3, "image_path": null }
 ```
 
-**Response (500 Internal Server Error)**:
+→ 200, `data` is the saved product. If `opening_quantity` > 0, an **"Opening stock"** IN movement is recorded at the same time.
+
+| Error | Status | Message |
+|---|---|---|
+| Field rules broken | 422 | Field list, e.g. `sku: Too small: expected string to have >=1 characters; price_centavos: Too small: expected number to be >=0` |
+| Unknown field sent | 422 | e.g. `: Unrecognized key: "colour"` |
+| SKU already used in this account | 409 | "This SKU already exists in your inventory. Choose another SKU." |
+| `image_path` is not your uploaded file | 422 | "Photo was not found in your storage. Upload it again." |
+
+### PUT /api/products?id=&lt;uuid&gt; — update
+
+Same body as create, but `opening_quantity` must be `0`. Balances change **only** through stock movements.
+
+| Error | Status | Message |
+|---|---|---|
+| `id` is not a valid UUID | 422 | "Select a valid product." |
+| Product not found / not yours | 404 | "Product not found. Refresh your inventory." |
+| `opening_quantity` not 0, or other invalid values | 422 | "Invalid values. Check the fields and retry." |
+| Duplicate SKU | 409 | "This SKU already exists in your inventory. Choose another SKU." |
+
+### PATCH /api/products — archive / restore / delete
+
 ```json
-{
-  "error": "Failed to fetch products",
-  "details": "Database unavailable"
-}
+{ "id": "product-uuid", "action": "archive" }
 ```
+`action` is `archive`, `restore`, or `delete` → 200 `{ "data": { "ok": true } }`
+
+| Error | Status | Message |
+|---|---|---|
+| Bad `id` or `action` | 422 | "Choose a product and valid action." |
+| Product not found / not yours | 404 | "Product not found. Refresh your inventory." |
+| Delete a product that has movements | 409 | "This product has movement history. Archive it instead." |
 
 ---
 
-### GET /api/products/[id]
+## Stock Movements
 
-Fetch a single product by ID.
+### GET /api/movements
 
-**Request example**:
-```
-GET /api/products/abc-123
-```
+Optional query: `?product_id=<uuid>`. Returns the account's movements, newest first, at most 500.
 
-**Response (200 OK)**:
 ```json
 {
-  "product": {
-    "id": "abc-123",
-    "sku": "DEMO-10",
-    "name": "Blue ballpoint pens",
-    "category": "Writing",
-    "unit_price": "12.50",
-    "quantity": 12,
-    "low_stock_threshold": 3,
-    "image_path": "user-id/photo.jpg",
-    "archived_at": null,
-    "created_at": "2026-10-07T10:00:00Z",
-    "updated_at": "2026-10-07T10:00:00Z"
-  }
+  "data": [
+    { "id": "uuid", "product_id": "uuid", "owner_id": "uuid", "type": "IN", "quantity": 5,
+      "previous_balance": 10, "resulting_balance": 15, "note": "Received five",
+      "request_id": "uuid", "created_at": "…" }
+  ],
+  "request_id": "…"
 }
 ```
+Another account's `product_id` returns an empty list, not an error.
 
-**Response (404 Not Found)**:
+### POST /api/movements — Stock In / Stock Out
+
+| Field | Type | Rule |
+|---|---|---|
+| `product_id` | UUID | Required |
+| `type` | string | `"IN"` or `"OUT"` |
+| `quantity` | integer | **Required.** 1 – 1,000,000,000 |
+| `note` | string | **Required.** 1–200 characters |
+| `request_id` | UUID | **Required.** Generated by the browser for each new movement |
+
 ```json
-{
-  "error": "Product not found"
-}
+{ "product_id": "uuid", "type": "IN", "quantity": 5, "note": "Received five", "request_id": "uuid" }
 ```
 
-**Response (403 Forbidden)**:
-Product exists but belongs to another user (RLS enforcement).
+→ 200, `data` is the saved movement (`previous_balance`, `resulting_balance`, …).
+
+The database function `adjust_stock` locks the product row, checks the new balance, updates the product, and writes the movement **in one transaction**. Either both change or neither does.
+
+**Idempotency (safe retries)**: sending the **same `request_id` with the same values** again returns the original movement with 200 and does **not** apply it twice. The form reuses the ID when you retry unchanged values after a failed or uncertain attempt.
+
+| Error | Status | Message |
+|---|---|---|
+| Missing/extra/invalid fields (e.g. `amount` instead of `quantity`, 0, −1, 1.5) | 422 | "Send quantity as a positive whole number, a short note, product ID, type, and request ID." |
+| Stock Out more than the balance | 409 | "Not enough stock. Reduce the quantity and retry." |
+| Product is archived | 409 | "Restore this product before adjusting stock." |
+| Balance would exceed 1,000,000,000 | 409 | "This movement exceeds the stock limit." |
+| Same `request_id`, different values | 409 | "This request ID was already used for different values. Start a new movement." |
+| Product not found / not yours | 404 | "Product not found. Refresh your inventory." |
 
 ---
 
-### POST /api/products
+## Photos (Supabase Storage)
 
-Create a new product.
+### POST /api/photos — upload
 
-**Request body**:
+`multipart/form-data` with one field, `file`: JPEG, PNG, or WebP, at most 2 MB. The file's first bytes must match its declared type.
+
+→ 200 `{ "data": { "path": "<your-user-id>/<random-uuid>.png" }, "request_id": "…" }`
+
+Then send that `path` as `image_path` in the product create/update. Files go to the **private** bucket `product-photos`, inside a folder named after your user ID.
+
+| Error | Status | Message |
+|---|---|---|
+| No file | 422 | "Select a photo first." |
+| Wrong type | 422 | "Choose a JPEG, PNG, or WebP image." |
+| Empty or over 2 MB | 422 | "Choose a nonempty image no larger than 2 MB." |
+| Contents don't match the type (e.g. a renamed .txt) | 422 | "The image contents do not match its type. Choose a valid JPEG, PNG, or WebP." |
+| Storage rejected or unreachable | 503 | "Photo upload failed. Retry, or choose Save without selected photo." |
+| Teaching defect `storage` active | 503 | "Teaching simulation: storage unavailable. …" |
+
+### DELETE /api/photos — remove an unused photo
+
 ```json
-{
-  "sku": "DEMO-10",
-  "name": "Blue ballpoint pens",
-  "category": "Writing",
-  "unit_price": 12.50,
-  "opening_quantity": 10,
-  "low_stock_threshold": 3,
-  "image_path": "user-id/photo.jpg"
-}
+{ "path": "<your-user-id>/<uuid>.png" }
 ```
+→ 200 `{ "data": { "ok": true } }`. The UI calls this to clean up after a failed save or a photo replacement.
 
-**Required fields**:
-- `sku` (string, uppercase, unique per owner)
-- `name` (string, non-empty)
-- `category` (string, non-empty)
-- `unit_price` (number, >= 0)
-- `opening_quantity` (integer, >= 0)
-- `low_stock_threshold` (integer, >= 0)
-
-**Optional fields**:
-- `image_path` (string, storage path)
-
-**Response (201 Created)**:
-```json
-{
-  "success": true,
-  "product": {
-    "id": "new-uuid",
-    "sku": "DEMO-10",
-    "name": "Blue ballpoint pens",
-    "quantity": 10,
-    ...
-  }
-}
-```
-
-**Response (400 Bad Request)**:
-```json
-{
-  "error": "Validation failed",
-  "details": "SKU already exists"
-}
-```
-
-**Response (409 Conflict)**:
-```json
-{
-  "error": "Duplicate SKU",
-  "details": "SKU 'DEMO-10' already exists in your inventory"
-}
-```
+| Error | Status | Message |
+|---|---|---|
+| Path not in your folder | 404 | "Photo not found." |
+| A product still uses it | 409 | "Photo is still in use. Save the new product reference first." |
+| Storage unavailable | 503 | "The unused photo could not be removed. …" |
 
 ---
 
-### PATCH /api/products/[id]
+## Database Layer (called by the API, not by the browser)
 
-Update an existing product. Does NOT directly modify `quantity`; use stock movements instead.
+| Function | Called by | Does |
+|---|---|---|
+| `save_product(p_id, p_data)` | POST/PUT `/api/products` | Insert or update a product; records the opening movement |
+| `adjust_stock(p_product_id, p_type, p_quantity, p_note, p_request_id)` | POST `/api/movements` | Atomic, idempotent balance change + movement record |
+| `manage_product(p_id, p_action)` | PATCH `/api/products` | Archive, restore, or delete (delete only without history) |
 
-**Request body** (all fields optional except at least one must be present):
-```json
-{
-  "sku": "DEMO-10A",
-  "name": "Blue ballpoint pens (updated)",
-  "category": "Office supplies",
-  "unit_price": 15.00,
-  "low_stock_threshold": 5,
-  "image_path": "user-id/new-photo.jpg"
-}
-```
-
-**Response (200 OK)**:
-```json
-{
-  "success": true,
-  "product": {
-    "id": "abc-123",
-    "sku": "DEMO-10A",
-    "name": "Blue ballpoint pens (updated)",
-    ...
-  }
-}
-```
-
-**Response (400 Bad Request)**:
-```json
-{
-  "error": "Validation failed",
-  "details": "unit_price must be a non-negative number"
-}
-```
-
-**Response (404 Not Found)**:
-```json
-{
-  "error": "Product not found"
-}
-```
+Signed-in users may only **read** the `products` and `stock_movements` tables, and only their own rows (RLS). All writes go through these functions. Direct inserts or updates are refused. See `supabase/migrations/001_inventory.sql`.
 
 ---
 
-### DELETE /api/products/[id]
+## Trying the API Yourself
 
-Delete a product. Only allowed if the product has no movement history.
+Requests need your session cookie, so the easiest place is the **DevTools Console of a signed-in StockLite tab**:
 
-**Request example**:
-```
-DELETE /api/products/abc-123
-```
+```js
+// List products
+await fetch('/api/products').then(r => r.json())
 
-**Response (200 OK)**:
-```json
-{
-  "success": true,
-  "message": "Product deleted"
-}
-```
-
-**Response (409 Conflict)**:
-```json
-{
-  "error": "Cannot delete product with movement history",
-  "details": "Archive the product instead to preserve audit trail"
-}
+// Send an invalid movement and read the status
+const r = await fetch('/api/movements', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ product_id: 'PASTE_ID', type: 'IN', quantity: 1.5, note: 'test', request_id: crypto.randomUUID() })
+});
+r.status;          // 422
+await r.json();    // { error: "Send quantity as …", request_id: "…" }
 ```
 
-**Response (404 Not Found)**:
-```json
-{
-  "error": "Product not found"
-}
-```
-
----
-
-### POST /api/products/[id]/archive
-
-Archive a product. Sets `archived_at` to the current timestamp. Movement history is retained.
-
-**Request example**:
-```
-POST /api/products/abc-123/archive
-```
-
-**Response (200 OK)**:
-```json
-{
-  "success": true,
-  "product": {
-    "id": "abc-123",
-    "archived_at": "2026-10-07T12:00:00Z",
-    ...
-  }
-}
-```
-
-**Response (404 Not Found)**:
-```json
-{
-  "error": "Product not found"
-}
-```
-
----
-
-### POST /api/products/[id]/restore
-
-Restore an archived product. Sets `archived_at` to `null`.
-
-**Request example**:
-```
-POST /api/products/abc-123/restore
-```
-
-**Response (200 OK)**:
-```json
-{
-  "success": true,
-  "product": {
-    "id": "abc-123",
-    "archived_at": null,
-    ...
-  }
-}
-```
-
-**Response (400 Bad Request)**:
-```json
-{
-  "error": "Product is not archived"
-}
-```
-
----
-
-## Stock Movements API
-
-### GET /api/products/[id]/movements
-
-Fetch movement history for a product.
-
-**Request example**:
-```
-GET /api/products/abc-123/movements
-```
-
-**Response (200 OK)**:
-```json
-{
-  "movements": [
-    {
-      "id": "movement-uuid",
-      "product_id": "abc-123",
-      "type": "OUT",
-      "quantity": 3,
-      "previous_balance": 15,
-      "resulting_balance": 12,
-      "note": "Released three",
-      "request_id": "req-xyz",
-      "created_at": "2026-10-07T11:00:00Z"
-    },
-    {
-      "id": "movement-uuid-2",
-      "product_id": "abc-123",
-      "type": "IN",
-      "quantity": 5,
-      "previous_balance": 10,
-      "resulting_balance": 15,
-      "note": "Received five",
-      "request_id": "req-abc",
-      "created_at": "2026-10-07T10:30:00Z"
-    }
-  ]
-}
-```
-
-Movements are ordered by `created_at DESC` (most recent first).
-
-**Response (404 Not Found)**:
-```json
-{
-  "error": "Product not found"
-}
-```
-
----
-
-### POST /api/movements
-
-Create a stock movement (Stock In or Stock Out). This is an atomic operation that updates the product quantity and inserts a movement record.
-
-**Request body**:
-```json
-{
-  "product_id": "abc-123",
-  "type": "IN",
-  "quantity": 5,
-  "note": "Received five units",
-  "request_id": "client-generated-uuid"
-}
-```
-
-**Required fields**:
-- `product_id` (UUID)
-- `type` (string, `"IN"` or `"OUT"`)
-- `quantity` (positive integer)
-- `request_id` (UUID, client-generated for idempotency)
-
-**Optional fields**:
-- `note` (string, description)
-
-**Response (201 Created)**:
-```json
-{
-  "success": true,
-  "movement": {
-    "id": "movement-uuid",
-    "product_id": "abc-123",
-    "type": "IN",
-    "quantity": 5,
-    "previous_balance": 10,
-    "resulting_balance": 15,
-    "note": "Received five units",
-    "request_id": "client-generated-uuid",
-    "created_at": "2026-10-07T11:00:00Z"
-  }
-}
-```
-
-**Response (400 Bad Request — Validation)**:
-```json
-{
-  "error": "Validation failed",
-  "details": "quantity must be a positive integer"
-}
-```
-
-**Response (400 Bad Request — Insufficient Stock)**:
-```json
-{
-  "error": "Stock out quantity exceeds available stock",
-  "details": "Requested 20, available 12"
-}
-```
-
-**Response (409 Conflict — Idempotency)**:
-If the same `request_id` is submitted again, the existing movement is returned without creating a duplicate:
-```json
-{
-  "success": true,
-  "movement": {
-    "id": "existing-movement-uuid",
-    ...
-  },
-  "message": "Movement already processed (idempotent)"
-}
-```
-
-**Response (404 Not Found)**:
-```json
-{
-  "error": "Product not found"
-}
-```
-
-**Response (409 Conflict — Archived Product)**:
-```json
-{
-  "error": "Cannot create movement for archived product",
-  "details": "Restore the product first"
-}
-```
-
----
-
-## Dashboard API
-
-### GET /api/dashboard
-
-Fetch summary statistics for the authenticated user's inventory.
-
-**Request example**:
-```
-GET /api/dashboard
-```
-
-**Response (200 OK)**:
-```json
-{
-  "active_products": 5,
-  "total_units": 120,
-  "low_stock_items": 2,
-  "recent_movements": [
-    {
-      "id": "movement-uuid",
-      "product_name": "Blue ballpoint pens",
-      "type": "OUT",
-      "quantity": 3,
-      "resulting_balance": 12,
-      "created_at": "2026-10-07T11:00:00Z"
-    }
-  ]
-}
-```
-
-**Fields**:
-- `active_products`: Count of non-archived products
-- `total_units`: Sum of `quantity` across all active products
-- `low_stock_items`: Count of products where `quantity <= low_stock_threshold`
-- `recent_movements`: Last 5 movements across all products
-
-**Response (500 Internal Server Error)**:
-```json
-{
-  "error": "Failed to fetch dashboard data"
-}
-```
-
----
-
-## Storage Integration
-
-Photo uploads go directly to Supabase Storage via the client SDK, not through these API routes. However, the product API accepts `image_path` references.
-
-**Expected `image_path` format**:
-```
-{user_id}/{uuid}.{ext}
-```
-
-Example: `a1b2c3d4-user-uuid/photo-uuid.jpg`
-
-**Client-side upload flow**:
-1. Validate file type and size on the client
-2. Generate a unique filename
-3. Call `supabase.storage.from('product-photos').upload(path, file)`
-4. On success, send `image_path` in the product create/update request
-5. On failure, handle error and offer retry or save-without-photo
-
-**Storage access**:
-- Private bucket with RLS-style policies
-- Images accessed via signed URLs (client SDK handles this automatically)
-- Policies enforce that users can only upload/read files in their own path
-
----
-
-## Error Response Format
-
-All error responses follow this structure:
-
-```json
-{
-  "error": "Brief error message",
-  "details": "Optional detailed explanation"
-}
-```
-
-**Common HTTP status codes**:
-- `400 Bad Request`: Invalid input, validation failure
-- `401 Unauthorized`: Not authenticated
-- `403 Forbidden`: Authenticated but not allowed (RLS)
-- `404 Not Found`: Resource doesn't exist
-- `409 Conflict`: Duplicate resource or business rule violation
-- `500 Internal Server Error`: Server or database issue
-
----
-
-## Request ID Correlation
-
-All requests should include a `request_id` (for movements) or can be traced via server-generated IDs in logs.
-
-**Client-generated request ID** (movements only):
-```typescript
-const request_id = crypto.randomUUID();
-```
-
-**Server logs** will include:
-```
-[movements] POST received | Request ID: abc-123
-```
-
-Use this ID to trace a request through Console → Network → Server logs → Database.
-
----
-
-## Rate Limiting
-
-No explicit rate limiting is implemented in this version. Supabase enforces connection pooling and query limits based on your plan tier.
-
-**Production considerations**:
-- Implement rate limiting middleware for public-facing deployments
-- Monitor Supabase dashboard for query performance and connection usage
-
----
-
-## Testing the API
-
-### Using curl
-
-**Fetch products**:
-```bash
-curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-  http://localhost:3000/api/products
-```
-
-**Create a movement**:
-```bash
-curl -X POST \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "product_id": "abc-123",
-    "type": "IN",
-    "quantity": 5,
-    "note": "Test movement",
-    "request_id": "test-uuid"
-  }' \
-  http://localhost:3000/api/movements
-```
-
-### Using Browser DevTools
-
-1. Sign in to StockLite
-2. Open DevTools → Console
-3. Run:
-```javascript
-const response = await fetch('/api/products');
-const data = await response.json();
-console.log(data);
-```
-
-### Using Postman or Insomnia
-
-Import the endpoints above as a collection. Use Supabase Auth to get a JWT token, then include it in the `Authorization` header as `Bearer <token>`.
-
----
-
-## Summary of Endpoints
-
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| GET | `/api/products` | List all products with optional filters |
-| GET | `/api/products/[id]` | Fetch single product |
-| POST | `/api/products` | Create new product |
-| PATCH | `/api/products/[id]` | Update product (not quantity) |
-| DELETE | `/api/products/[id]` | Delete product (if no movements) |
-| POST | `/api/products/[id]/archive` | Archive product |
-| POST | `/api/products/[id]/restore` | Restore archived product |
-| GET | `/api/products/[id]/movements` | Fetch movement history |
-| POST | `/api/movements` | Create stock movement (atomic) |
-| GET | `/api/dashboard` | Fetch dashboard summary |
-
----
-
-## Further Reading
-
-- `docs/database-schema.md` — Table structures and constraints
-- `docs/debugging-guide.md` — How to trace requests and diagnose issues
-- `teaching/defects.md` — Controlled API failures for testing
+Tip: in the Network tab, right-click a request → **Copy → Copy as fetch**, paste it into the Console, change one value, and run it. That is a quick way to test server-side validation that the form normally blocks.
